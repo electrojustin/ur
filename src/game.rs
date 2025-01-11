@@ -1,4 +1,5 @@
 use std::fmt;
+use std::hash::Hash;
 use std::vec;
 
 pub const MAX_PIECES: u8 = 5;
@@ -8,7 +9,7 @@ pub const FIRST_ROSE: i32 = 3;
 pub const SHARED_ROSE: i32 = 7;
 pub const LAST_ROSE: i32 = 13;
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum Color {
     Black = 0,
     White = 1,
@@ -34,7 +35,7 @@ pub fn opposite_color(color: Color) -> Color {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Debug, Default)]
+#[derive(Clone, PartialEq, Eq, Debug, Default, Hash)]
 pub struct GameState {
     pub pending: [u8; 2],
     pub finished: [u8; 2],

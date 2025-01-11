@@ -6,7 +6,7 @@ use crate::game::GameState;
 
 const BINOM_PROB: [f64; 5] = [0.0625, 0.25, 0.375, 0.25, 0.0625];
 
-fn eval_move(
+fn minmax_eval_move(
     state: &GameState,
     color: Color,
     roll: i32,
@@ -46,11 +46,11 @@ fn eval_move(
                 // If you have no legal moves then your turn gets skipped. Signal this with move -2.
                 ret += sign
                     * BINOM_PROB[roll as usize]
-                    * eval_move(&new_state, next_color, roll, -2, ply_depth + 1, max_depth);
+                    * minmax_eval_move(&new_state, next_color, roll, -2, ply_depth + 1, max_depth);
             } else {
                 let mut move_scores: Vec<f64> = vec![];
                 for legal_move in legal_moves {
-                    move_scores.push(eval_move(
+                    move_scores.push(minmax_eval_move(
                         &new_state,
                         next_color,
                         roll,
@@ -69,7 +69,7 @@ fn eval_move(
     }
 }
 
-pub fn select_ai_move(state: &GameState, color: Color, roll: i32, max_depth: usize) -> i32 {
+pub fn minmax_select_move(state: &GameState, color: Color, roll: i32, max_depth: usize) -> i32 {
     let legal_moves = state.get_legal_moves(color, roll);
     if legal_moves.len() == 0 {
         return 0;
@@ -79,7 +79,7 @@ pub fn select_ai_move(state: &GameState, color: Color, roll: i32, max_depth: usi
     let mut best_score = f64::MIN;
 
     for legal_move in legal_moves {
-        let score = eval_move(&state, color, roll, legal_move, 0, max_depth);
+        let score = minmax_eval_move(&state, color, roll, legal_move, 0, max_depth);
         if score > best_score {
             best_score = score;
             best_move = legal_move;
