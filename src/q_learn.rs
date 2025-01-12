@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 use std::fs::File;
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::io::Read;
-use std::io::Write;
+use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::Path;
 
 use rand::{thread_rng, Rng};
@@ -12,12 +11,11 @@ use crate::game::Color;
 use crate::game::GameState;
 
 const LEARNING_RATE: f32 = 0.1;
-const GAMMA: f32 = 0.99;
+const GAMMA: f32 = 0.9;
 const INIT_EXPLORATION_PROB: f32 = 1.0;
 const LAMBDA: f32 = 0.00000005;
 const TRAINING_GAMES: usize = 60000000;
-//const LAMBDA: f32 = 0.000003;
-//const TRAINING_GAMES: usize = 1000000;
+const INIT_QMATRIX_ROW: [f32; 5] = [0.0, 0.0, 0.0, 0.0, 0.0];
 
 #[derive(Clone, PartialEq, Eq, Debug, Hash)]
 struct QState {
@@ -32,10 +30,10 @@ pub fn q_select_move(
     color: Color,
     q_matrix: &HashMap<u64, [f32; 5]>,
     exploration_prob: f32,
-) -> (i32, usize) {
+) -> (i32, usize, usize) {
     let mut legal_moves = state.get_legal_moves(color, roll);
     if legal_moves.len() == 0 {
-        return (-2, 0);
+        return (-2, 0, 0);
     }
 
     legal_moves.sort();
@@ -43,7 +41,7 @@ pub fn q_select_move(
     let mut rng = thread_rng();
     if rng.gen_bool(exploration_prob as f64) {
         let move_idx = rng.gen_range(0..(legal_moves.len()));
-        (legal_moves[move_idx], move_idx)
+        (legal_moves[move_idx], move_idx, legal_moves.len())
     } else {
         let mut hasher = DefaultHasher::new();
         let q_state = QState {
@@ -55,10 +53,7 @@ pub fn q_select_move(
         let hash = hasher.finish();
         let mut max_score = f32::MIN;
         let mut max_idx = 0;
-        let q_matrix_row = q_matrix
-            .get(&hash)
-            .cloned()
-            .unwrap_or([0.0, 0.0, 0.0, 0.0, 0.0]);
+        let q_matrix_row = q_matrix.get(&hash).unwrap_or(&INIT_QMATRIX_ROW);
         for idx in 0..(legal_moves.len()) {
             if q_matrix_row[idx] > max_score {
                 max_idx = idx;
@@ -69,12 +64,12 @@ pub fn q_select_move(
             println!("{q_matrix_row:?}");
             println!("Selecting move idx {} ({})", max_idx, legal_moves[max_idx]);
         }
-        (legal_moves[max_idx], max_idx)
+        (legal_moves[max_idx], max_idx, legal_moves.len())
     }
 }
 
 fn self_play_game(q_matrix: &mut HashMap<u64, [f32; 5]>, exploration_prob: f32) {
-    let mut history: Vec<(QState, usize)> = vec![];
+    let mut history: Vec<(QState, usize, usize)> = vec![];
 
     let mut state = GameState::new();
     let mut rng = thread_rng();
@@ -93,7 +88,7 @@ fn self_play_game(q_matrix: &mut HashMap<u64, [f32; 5]>, exploration_prob: f32) 
             roll += rng.gen_range(0..2);
         }
 
-        let (selected_move, move_idx) =
+        let (selected_move, move_idx, num_legal_moves) =
             q_select_move(&state, roll, turn, q_matrix, exploration_prob);
         if selected_move != -2 {
             history.push((
@@ -103,6 +98,7 @@ fn self_play_game(q_matrix: &mut HashMap<u64, [f32; 5]>, exploration_prob: f32) 
                     turn: turn,
                 },
                 move_idx,
+                num_legal_moves,
             ));
 
             if state.exec_move(turn, roll, selected_move) {
@@ -116,19 +112,42 @@ fn self_play_game(q_matrix: &mut HashMap<u64, [f32; 5]>, exploration_prob: f32) 
         }
     };
 
-    for step in history {
+    for i in 0..history.len() {
+        let step = &history[i];
         let reward = state.finished[step.0.turn as usize] as f32
             - state.finished[opposite_color(step.0.turn) as usize] as f32;
+        let next_state_max_reward = if i == history.len() - 1 {
+            reward
+        } else {
+            let mut hasher = DefaultHasher::new();
+            history[i + 1].0.hash(&mut hasher);
+            let hash = hasher.finish();
+            let sign = if history[i + 1].0.turn == step.0.turn { 1.0 } else { -1.0 };
+            match q_matrix.get(&hash) {
+                Some(q_matrix_row) => sign * q_matrix_row
+                    .iter()
+                    .copied()
+                    .fold(f32::MIN, f32::max),
+                None => 0.0,
+            }
+        };
         let mut hasher = DefaultHasher::new();
         step.0.hash(&mut hasher);
         let hash = hasher.finish();
-        let mut q_matrix_row = q_matrix
-            .get(&hash)
-            .cloned()
-            .unwrap_or([0.0, 0.0, 0.0, 0.0, 0.0]);
-        q_matrix_row[step.1] = (1.0 - LEARNING_RATE) * q_matrix_row[step.1]
-            + LEARNING_RATE * (reward + GAMMA * q_matrix_row.into_iter().fold(f32::MIN, f32::max));
-        q_matrix.insert(hash, q_matrix_row);
+        match q_matrix.get_mut(&hash) {
+            Some(q_matrix_row) => {
+                q_matrix_row[step.1] = (1.0 - LEARNING_RATE) * q_matrix_row[step.1]
+                    + LEARNING_RATE * (reward + GAMMA * next_state_max_reward);
+            }
+            None => {
+                let mut q_matrix_row = INIT_QMATRIX_ROW.clone();
+                for illegal_move in step.2..5 {
+                  q_matrix_row[illegal_move] = f32::MIN;
+                }
+                q_matrix_row[step.1] = LEARNING_RATE * (reward + GAMMA * next_state_max_reward);
+                q_matrix.insert(hash, q_matrix_row);
+            }
+        };
     }
 }
 
@@ -156,6 +175,7 @@ pub fn get_q_matrix() -> HashMap<u64, [f32; 5]> {
     let cache_path = Path::new("q_matrix_cache");
     match File::open(&cache_path) {
         Ok(mut q_matrix_cache) => {
+            let mut q_matrix_cache = BufReader::new(q_matrix_cache);
             let mut key_buf: [u8; 8] = [0, 0, 0, 0, 0, 0, 0, 0];
             let mut value_buf: [u8; 4] = [0, 0, 0, 0];
             let mut key: u64 = 0;
@@ -175,7 +195,7 @@ pub fn get_q_matrix() -> HashMap<u64, [f32; 5]> {
             }
         }
         Err(_) => {
-            let mut q_matrix_cache = File::create(&cache_path).unwrap();
+            let mut q_matrix_cache = BufWriter::new(File::create(&cache_path).unwrap());
 
             train(&mut ret);
 

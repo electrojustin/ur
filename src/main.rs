@@ -14,7 +14,7 @@ mod game;
 mod minmax;
 mod q_learn;
 
-const NUM_GAMES: usize = 100;
+const NUM_GAMES: usize = 1000;
 
 fn get_user_move(legal_moves: Vec<i32>) -> i32 {
     'move_select: loop {
@@ -44,8 +44,8 @@ fn main() {
     for _i in 0..NUM_GAMES {
         let mut state = GameState::new();
         let mut rng = thread_rng();
-        let q_ai = Color::Black;
-        let minmax_ai = Color::White;
+        let q_ai = Color::White;
+        let minmax_ai = Color::Black;
         let mut turn = Color::Black;
         let mut is_first_turn = true;
         'game_loop: loop {
@@ -68,11 +68,11 @@ fn main() {
             if legal_moves.len() != 0 {
                 let chosen_move = if turn == q_ai {
                     q_select_move(
-                        &state, roll, q_ai, &q_matrix, /*explore_probability=*/ 0.0,
+                        &state, roll, turn, &q_matrix, /*explore_probability=*/ 0.0,
                     )
                     .0
                 } else {
-                    minmax_select_move(&state, minmax_ai, roll, /*max_depth=*/ 5)
+                    minmax_select_move(&state, turn, roll, /*max_depth=*/ 5)
                 };
                 if state.exec_move(turn, roll, chosen_move) {
                     // Roll again
